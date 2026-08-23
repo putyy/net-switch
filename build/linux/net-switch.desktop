@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Net Switch
+Comment=Wi-Fi network configuration switcher
+Exec=net-switch
+Icon=net-switch
+Terminal=false
+Categories=System;Network;
+StartupNotify=false

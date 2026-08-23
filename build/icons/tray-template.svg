@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <g transform="scale(.5)" fill="#000">
+    <rect x="22" y="30" width="16" height="58" rx="8"/>
+    <path d="m35 26 35 35-12 12-35-35Z"/>
+    <path d="m58 58 35-35 12 12-35 35Z"/>
+    <path d="m112 16-30 2 22 26Z"/>
+    <rect x="90" y="40" width="16" height="58" rx="8"/>
+    <path d="m93 102-35-35 12-12 35 35Z"/>
+    <path d="m70 70-35 35-12-12 35-35Z"/>
+    <path d="m16 112 30-2-22-26Z"/>
+  </g>
+</svg>

@@ -1,0 +1,214 @@
+name: Build and release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read and validate version
+        id: version
+        shell: bash
+        run: |
+          version=$(tr -d '\r\n' < VERSION)
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "VERSION must use x.y.z format" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+  static-checks:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Static checks
+        shell: bash
+        run: |
+          gofmt_output=$(gofmt -l .)
+          if [[ -n "$gofmt_output" ]]; then
+            echo "$gofmt_output"
+            exit 1
+          fi
+          go vet ./...
+          node --check web/app.js
+          sh -n build/package-macos.sh
+          sh -n build/package-macos-dmg.sh
+          sh -n build/package-linux.sh
+
+  macos:
+    needs: [prepare, static-checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            runner: macos-15
+          - architecture: amd64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build DMG
+        shell: bash
+        run: sh build/package-macos-dmg.sh "${{ matrix.architecture }}"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: net-switch-${{ needs.prepare.outputs.version }}-macos-${{ matrix.architecture }}
+          path: build/dist/Net-Switch-${{ needs.prepare.outputs.version }}-${{ matrix.architecture }}.dmg
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    needs: [prepare, static-checks]
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --yes --no-progress
+
+      - name: Build Windows packages
+        shell: pwsh
+        run: ./build/package-windows.ps1 -Architecture "${{ matrix.architecture }}"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: net-switch-${{ needs.prepare.outputs.version }}-windows-${{ matrix.architecture }}
+          path: |
+            build/dist/Net-Switch-${{ needs.prepare.outputs.version }}-windows-${{ matrix.architecture }}.zip
+            build/dist/Net-Switch-${{ needs.prepare.outputs.version }}-windows-${{ matrix.architecture }}-setup.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  linux:
+    needs: [prepare, static-checks]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Linux packages
+        shell: bash
+        run: sh build/package-linux.sh "${{ matrix.architecture }}"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: net-switch-${{ needs.prepare.outputs.version }}-linux-${{ matrix.architecture }}
+          path: |
+            build/dist/Net-Switch-${{ needs.prepare.outputs.version }}-linux-${{ matrix.architecture }}.tar.gz
+            build/dist/Net-Switch-${{ needs.prepare.outputs.version }}-linux-${{ matrix.architecture }}.deb
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [prepare, macos, windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        working-directory: release-assets
+        shell: bash
+        run: sha256sum Net-Switch-* > SHA256SUMS
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Net Switch $RELEASE_VERSION"
+          fi
+
+      - name: Delete temporary workflow artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api --paginate \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[].id' |
+          while IFS= read -r artifact_id; do
+            if [[ -n "$artifact_id" ]]; then
+              gh api --method DELETE \
+                "/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
+            fi
+          done

@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="description" content="Net Switch 本地网络配置控制面板" data-i18n-content="meta.description">
+    <title>Net Switch</title>
+    <link rel="icon" type="image/svg+xml" href="/logo.svg">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/i18n.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Net Switch 控制面板首页" data-i18n-aria-label="brand.home">
+          <img class="brand-mark" src="/logo.svg" alt="" width="42" height="42">
+          <span>
+            <strong>Net Switch</strong>
+            <small data-i18n="brand.subtitle">跨平台网络切换助手</small>
+          </span>
+        </a>
+        <div class="topbar-actions">
+          <a
+            class="github-link"
+            href="https://github.com/putyy/netswitch"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="在 GitHub 上查看 putyy/netswitch 项目"
+            data-i18n-aria-label="project.github"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.58 9.58 0 0 1 12 6.82c.85 0 1.71.12 2.51.34 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.77c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"></path>
+            </svg>
+            <span>putyy/netswitch</span>
+          </a>
+          <span class="connection-pill" id="connection-pill">
+            <span class="connection-dot" aria-hidden="true"></span>
+            <span id="connection-label" data-i18n="connection.connecting">正在连接本地服务</span>
+          </span>
+        </div>
+      </header>
+
+      <section class="network-card" aria-labelledby="current-network-title">
+        <div class="network-heading">
+          <div>
+            <p class="eyebrow">CURRENT NETWORK</p>
+            <h1 id="current-network-title" data-i18n="network.title">当前网络</h1>
+            <p class="section-copy" id="network-summary" data-i18n="network.loading">正在通过本地 API 读取网络状态…</p>
+          </div>
+          <span class="mode-badge" id="network-mode" data-i18n="common.loading">读取中</span>
+        </div>
+
+        <dl class="network-grid" aria-live="polite">
+          <div><dt>Wi-Fi SSID</dt><dd id="network-ssid">—</dd></div>
+          <div><dt data-i18n="network.interface">网络接口</dt><dd id="network-interface">—</dd></div>
+          <div><dt data-i18n="network.ipv4">IPv4 地址</dt><dd id="network-address">—</dd></div>
+          <div><dt data-i18n="network.netmask">子网掩码</dt><dd id="network-netmask">—</dd></div>
+          <div><dt data-i18n="network.gateway">默认网关</dt><dd id="network-gateway">—</dd></div>
+          <div><dt>DNS</dt><dd id="network-dns">—</dd></div>
+        </dl>
+
+        <div class="network-actions">
+          <div class="network-statuses" aria-live="polite">
+            <p class="auto-switch-status" id="auto-switch-status" data-i18n="network.autoWaiting">等待自动切换判断。</p>
+            <p class="operation-status" id="operation-status" data-i18n="network.operationNone">尚未执行网络操作。</p>
+          </div>
+          <div class="network-action-buttons">
+            <button class="button primary" id="apply-rule-button" type="button" disabled data-i18n="network.applyRule">立即应用匹配规则</button>
+            <button class="button ghost" id="restore-dhcp-button" type="button" disabled data-i18n="network.restoreDHCP">恢复 DHCP</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="panel rules-panel" aria-labelledby="rules-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">NETWORK RULES</p>
+              <h2 id="rules-title" data-i18n="rules.title">网络规则</h2>
+              <p class="section-copy"><span id="rule-count">0</span> <span data-i18n="rules.countSuffix">条规则，根据 Wi-Fi SSID 精确匹配。</span></p>
+            </div>
+            <button class="button primary" id="new-rule-button" type="button" disabled>
+              <span aria-hidden="true">＋</span> <span data-i18n="rules.new">新建规则</span>
+            </button>
+          </div>
+
+          <div class="rule-list" id="rule-list" role="list" aria-live="polite" aria-busy="true">
+            <div class="loading-state">
+              <span class="spinner" aria-hidden="true"></span>
+              <p data-i18n="rules.loading">正在加载规则…</p>
+            </div>
+          </div>
+        </section>
+
+        <aside class="panel settings-panel" aria-labelledby="settings-title">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">BEHAVIOR</p>
+              <h2 id="settings-title" data-i18n="settings.title">自动切换</h2>
+            </div>
+          </div>
+
+          <form id="settings-form">
+            <label class="toggle-row" for="auto-switch">
+              <span>
+                <strong data-i18n="settings.autoSwitch">启用自动切换</strong>
+                <small data-i18n="settings.autoSwitchHelp">网络变化后自动匹配已启用规则</small>
+              </span>
+              <span class="switch">
+                <input id="auto-switch" name="auto_switch" type="checkbox">
+                <span aria-hidden="true"></span>
+              </span>
+            </label>
+
+            <label class="field" for="unmatched-action">
+              <span data-i18n="settings.unmatched">没有匹配规则时</span>
+              <select id="unmatched-action" name="unmatched_action">
+                <option value="keep" data-i18n="settings.keep">保持当前配置</option>
+                <option value="dhcp" data-i18n="settings.restoreDHCP">恢复 DHCP</option>
+              </select>
+            </label>
+
+            <label class="field" for="language">
+              <span data-i18n="settings.language">界面语言</span>
+              <select id="language" name="language">
+                <option value="zh-CN">简体中文</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+
+            <button class="button secondary full-width" id="save-settings-button" type="submit" disabled data-i18n="settings.save">保存设置</button>
+          </form>
+
+          <div class="autostart-setting">
+            <label class="toggle-row" for="autostart-toggle">
+              <span>
+                <strong data-i18n="autostart.title">登录时启动</strong>
+                <small id="autostart-status" data-i18n="autostart.loading">正在读取开机启动状态…</small>
+              </span>
+              <span class="switch">
+                <input id="autostart-toggle" type="checkbox" disabled>
+                <span aria-hidden="true"></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="local-note">
+            <span class="local-note-icon" aria-hidden="true">⌁</span>
+            <p><strong data-i18n="local.title">仅在本机运行</strong><br><span data-i18n="local.copy">页面与数据接口只监听 127.0.0.1。</span></p>
+          </div>
+        </aside>
+      </div>
+
+      <section class="panel logs-panel" aria-labelledby="logs-title">
+        <div class="panel-heading logs-heading">
+          <div>
+            <p class="eyebrow">RECENT ACTIVITY</p>
+            <h2 id="logs-title" data-i18n="logs.title">最近日志</h2>
+            <p class="section-copy" data-i18n="logs.copy">显示本机日志文件中的最近 100 行。</p>
+          </div>
+          <button class="button ghost" id="refresh-logs-button" type="button" disabled data-i18n="logs.refresh">刷新日志</button>
+        </div>
+        <pre class="log-output" id="log-output" aria-live="polite" data-i18n="logs.loading">正在读取最近日志…</pre>
+      </section>
+
+      <footer>
+        <span>Net Switch</span>
+        <span aria-hidden="true">·</span>
+        <span id="app-version" data-i18n="version.loading">版本读取中</span>
+        <span aria-hidden="true">·</span>
+        <span data-i18n="footer.savedLocally">配置修改会立即保存到本机</span>
+      </footer>
+    </main>
+
+    <dialog class="modal" id="rule-dialog" aria-labelledby="rule-dialog-title">
+      <form class="modal-form" id="rule-form">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">RULE EDITOR</p>
+            <h2 id="rule-dialog-title">新建规则</h2>
+          </div>
+          <button class="icon-button" id="close-rule-dialog" type="button" aria-label="关闭规则编辑器" data-i18n-aria-label="rules.closeEditor">×</button>
+        </div>
+
+        <input id="rule-id" name="id" type="hidden">
+
+        <div class="form-grid">
+          <label class="field" for="rule-name">
+            <span data-i18n="rules.name">规则名称</span>
+            <input id="rule-name" name="name" type="text" maxlength="100" autocomplete="off" placeholder="例如：公司网络" data-i18n-placeholder="rules.namePlaceholder" required>
+          </label>
+
+          <label class="field" for="rule-ssid">
+            <span>Wi-Fi SSID</span>
+            <input id="rule-ssid" name="ssid" type="text" maxlength="32" autocomplete="off" placeholder="精确匹配当前 Wi-Fi 名称" data-i18n-placeholder="rules.ssidPlaceholder" required>
+          </label>
+
+          <label class="field" for="ipv4-mode">
+            <span data-i18n="rules.ipv4Mode">IPv4 模式</span>
+            <select id="ipv4-mode" name="mode">
+              <option value="dhcp" data-i18n="rules.dhcp">DHCP 自动获取</option>
+              <option value="static" data-i18n="rules.static">静态配置</option>
+            </select>
+          </label>
+
+          <label class="checkbox-row" for="rule-enabled">
+            <input id="rule-enabled" name="enabled" type="checkbox" checked>
+            <span>
+              <strong data-i18n="rules.enableNow">立即启用</strong>
+              <small data-i18n="rules.enableHelp">停用的规则会保留，但不会自动匹配</small>
+            </span>
+          </label>
+        </div>
+
+        <fieldset class="static-fields" id="static-fields" hidden>
+          <legend data-i18n="rules.staticIPv4">静态 IPv4</legend>
+          <div class="form-grid">
+            <label class="field" for="ipv4-address">
+              <span data-i18n="network.ipv4">IPv4 地址</span>
+              <input id="ipv4-address" name="address" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.10.66">
+            </label>
+            <label class="field" for="ipv4-netmask">
+              <span data-i18n="network.netmask">子网掩码</span>
+              <input id="ipv4-netmask" name="netmask" type="text" inputmode="decimal" autocomplete="off" placeholder="255.255.255.0">
+            </label>
+            <label class="field" for="ipv4-gateway">
+              <span data-i18n="network.gateway">默认网关</span>
+              <input id="ipv4-gateway" name="gateway" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.10.1">
+            </label>
+            <label class="field" for="ipv4-dns">
+              <span data-i18n="rules.dnsServers">DNS 服务器</span>
+              <input id="ipv4-dns" name="dns" type="text" autocomplete="off" placeholder="1.1.1.1, 8.8.8.8">
+              <small data-i18n="rules.dnsHelp">多个地址使用逗号分隔，最多 8 个。</small>
+            </label>
+          </div>
+        </fieldset>
+
+        <p class="form-error" id="rule-form-error" role="alert" hidden></p>
+
+        <div class="modal-actions">
+          <button class="button ghost" id="cancel-rule-button" type="button" data-i18n="common.cancel">取消</button>
+          <button class="button primary" id="save-rule-button" type="submit" data-i18n="rules.save">保存规则</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal confirm-modal" id="delete-dialog" aria-labelledby="delete-dialog-title">
+      <div class="modal-form">
+        <div class="danger-mark" aria-hidden="true">!</div>
+        <h2 id="delete-dialog-title" data-i18n="rules.deleteTitle">删除这条规则？</h2>
+        <p id="delete-dialog-copy" data-i18n="rules.deleteCopy">删除后无法恢复，但不会立即修改当前网络配置。</p>
+        <div class="modal-actions centered">
+          <button class="button ghost" id="cancel-delete-button" type="button" data-i18n="common.cancel">取消</button>
+          <button class="button danger" id="confirm-delete-button" type="button" data-i18n="rules.confirmDelete">确认删除</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="modal confirm-modal" id="restore-dhcp-dialog" aria-labelledby="restore-dhcp-dialog-title">
+      <div class="modal-form">
+        <div class="warning-mark" aria-hidden="true">↺</div>
+        <h2 id="restore-dhcp-dialog-title" data-i18n="dhcp.title">恢复 DHCP？</h2>
+        <p data-i18n="dhcp.copy">当前 Wi-Fi 网络服务将改为 DHCP 和自动 DNS，现有静态配置可能立即失效。</p>
+        <div class="modal-actions centered">
+          <button class="button ghost" id="cancel-restore-dhcp-button" type="button" data-i18n="common.cancel">取消</button>
+          <button class="button danger" id="confirm-restore-dhcp-button" type="button" data-i18n="dhcp.confirm">确认恢复</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

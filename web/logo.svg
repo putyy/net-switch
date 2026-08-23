@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Net Switch">
+  <rect x="4" y="4" width="120" height="120" rx="32" fill="#17231d"/>
+  <g fill="#72e6a0">
+    <rect x="22" y="30" width="16" height="58" rx="8"/>
+    <path d="m35 26 35 35-12 12-35-35Z"/>
+    <path d="m58 58 35-35 12 12-35 35Z"/>
+    <path d="m112 16-30 2 22 26Z"/>
+  </g>
+  <g fill="#d7f7e3">
+    <rect x="90" y="40" width="16" height="58" rx="8"/>
+    <path d="m93 102-35-35 12-12 35 35Z"/>
+    <path d="m70 70-35 35-12-12 35-35Z"/>
+    <path d="m16 112 30-2-22-26Z"/>
+  </g>
+</svg>

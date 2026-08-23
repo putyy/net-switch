@@ -1,0 +1,10 @@
+Package: net-switch
+Version: {{VERSION}}
+Section: net
+Priority: optional
+Architecture: {{ARCHITECTURE}}
+Maintainer: Net Switch Contributors
+Depends: network-manager, xdg-utils
+Description: Wi-Fi network configuration tray client
+ Net Switch runs in the desktop system tray and opens its embedded
+ management interface in the default browser.
