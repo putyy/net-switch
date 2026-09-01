@@ -110,27 +110,47 @@ func (r *Reader) Read(ctx context.Context) (network.State, error) {
 		state.MessageKey = "state.route_unknown"
 		return state, err
 	}
+	ssidResolved := false
+	var activeService service
 	if !connected {
-		if wifi, ok := firstWiFiService(services); ok {
-			state.Service = wifi.Name
-			state.Interface = wifi.Interface
+		wifi, ok := firstWiFiService(services)
+		if !ok {
+			state.Status = network.StateStatusDisconnected
+			state.Message = "No default IPv4 network is available"
+			state.MessageKey = "state.no_default_route"
+			return state, nil
 		}
-		state.Status = network.StateStatusDisconnected
-		state.Message = "No default IPv4 network is available"
-		state.MessageKey = "state.no_default_route"
-		return state, nil
-	}
-	state.Interface = interfaceName
-	state.Gateway = gateway
-	state.Status = network.StateStatusConnected
 
-	activeService, ok := serviceForInterface(services, interfaceName)
-	if !ok {
-		state.Message = "The network service for the default interface could not be identified"
-		state.MessageKey = "state.service_unknown"
-		return state, fmt.Errorf("no network service found for interface %q", interfaceName)
+		// A Wi-Fi link can be associated before macOS installs a usable default
+		// route, especially when a static configuration from another network is
+		// still active. Resolve the Wi-Fi link directly so automatic switching can
+		// inspect the SSID and restore DHCP instead of getting stuck here.
+		activeService = wifi
+		state.Service = wifi.Name
+		state.Interface = wifi.Interface
+		ssidResolved = true
+		if !r.applySSID(ctx, &state, wifi) {
+			state.Status = network.StateStatusDisconnected
+			if state.MessageKey == "" || state.MessageKey == "state.ssid_unavailable" {
+				state.Message = "No default IPv4 network is available"
+				state.MessageKey = "state.no_default_route"
+			}
+			return state, nil
+		}
+	} else {
+		state.Interface = interfaceName
+		state.Gateway = gateway
+		var found bool
+		activeService, found = serviceForInterface(services, interfaceName)
+		if !found {
+			state.Status = network.StateStatusConnected
+			state.Message = "The network service for the default interface could not be identified"
+			state.MessageKey = "state.service_unknown"
+			return state, fmt.Errorf("no network service found for interface %q", interfaceName)
+		}
+		state.Service = activeService.Name
 	}
-	state.Service = activeService.Name
+	state.Status = network.StateStatusConnected
 
 	infoOutput, err := r.runner.Run(ctx, networkSetupPath, "-getinfo", activeService.Name)
 	if err != nil {
@@ -159,25 +179,31 @@ func (r *Reader) Read(ctx context.Context) (network.State, error) {
 		state.MessageKey = "state.non_wifi"
 		return state, nil
 	}
+	if !ssidResolved {
+		r.applySSID(ctx, &state, activeService)
+	}
+	return state, nil
+}
 
+func (r *Reader) applySSID(ctx context.Context, state *network.State, activeService service) bool {
 	if r.ssidProvider != nil {
 		ssid, access, providerErr := r.ssidProvider.CurrentSSID(activeService.Interface)
 		switch {
 		case providerErr == nil && ssid != "":
 			state.SSID = ssid
-			return state, nil
+			return true
 		case access == ssidAccessPending:
 			state.Message = "Waiting for macOS location permission"
 			state.MessageKey = "state.permission_pending"
-			return state, nil
+			return false
 		case access == ssidAccessDenied:
 			state.Message = "Location permission was denied for Net Switch"
 			state.MessageKey = "state.permission_denied"
-			return state, nil
+			return false
 		case access == ssidAccessRestricted:
 			state.Message = "Location services are restricted, so the current Wi-Fi name cannot be read"
 			state.MessageKey = "state.permission_restricted"
-			return state, nil
+			return false
 		}
 	}
 
@@ -185,12 +211,12 @@ func (r *Reader) Read(ctx context.Context) (network.State, error) {
 	if err == nil {
 		if ssid, ok := parseSSID(ssidOutput); ok {
 			state.SSID = ssid
-			return state, nil
+			return true
 		}
 	}
 	state.Message = "Wi-Fi is connected, but macOS did not return its name"
 	state.MessageKey = "state.ssid_unavailable"
-	return state, nil
+	return false
 }
 
 func (r *Reader) readDefaultRoute(ctx context.Context) (string, string, bool, error) {

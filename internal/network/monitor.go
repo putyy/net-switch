@@ -167,7 +167,7 @@ func (m *Monitor) Run(ctx context.Context) {
 }
 
 func shouldRetryRead(update Update) bool {
-	return update.Err != nil || update.State.Status == StateStatusUnavailable || update.State.Status == StateStatusUnknown
+	return update.Err != nil || update.State.Status == StateStatusUnavailable || update.State.Status == StateStatusUnknown || update.State.Status == StateStatusDisconnected
 }
 
 func (m *Monitor) Snapshot() State {

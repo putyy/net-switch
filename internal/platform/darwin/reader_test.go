@@ -48,6 +48,13 @@ Client ID:
 IPv6: Automatic
 `
 
+const staticInfoFixture = `Manual Configuration
+IP address: 10.20.30.40
+Subnet mask: 255.255.255.0
+Router: 10.20.30.1
+IPv6: Automatic
+`
+
 const effectiveDNSFixture = `DNS configuration
 
 resolver #1
@@ -193,6 +200,32 @@ func TestReaderReturnsDisconnectedStateWithoutDefaultRoute(t *testing.T) {
 	}
 	if state.Status != network.StateStatusDisconnected || state.Service != "Wi-Fi" || state.Interface != "en0" {
 		t.Fatalf("断网状态错误: %#v", state)
+	}
+}
+
+func TestReaderReadsAssociatedWiFiWithoutDefaultRoute(t *testing.T) {
+	runner := fakeRunner{
+		outputs: map[string]string{
+			commandKey(networkSetupPath, "-listnetworkserviceorder"):  serviceOrderFixture,
+			commandKey(netstatPath, "-rn", "-f", "inet"):              "Routing tables\n\nInternet:\nDestination Gateway Flags Netif\n",
+			commandKey(networkSetupPath, "-getairportnetwork", "en0"): "Current Wi-Fi Network: Guest-WiFi\n",
+			commandKey(networkSetupPath, "-getinfo", "Wi-Fi"):         staticInfoFixture,
+			commandKey(networkSetupPath, "-getdnsservers", "Wi-Fi"):   "1.1.1.1\n",
+		},
+		errors: map[string]error{
+			commandKey(routePath, "-n", "get", "default"): errors.New("not in table"),
+		},
+	}
+
+	state, err := newReader(runner).Read(context.Background())
+	if err != nil {
+		t.Fatalf("无默认路由时读取已连接 Wi-Fi 失败: %v", err)
+	}
+	if state.Status != network.StateStatusConnected || state.SSID != "Guest-WiFi" || state.Service != "Wi-Fi" || state.Interface != "en0" {
+		t.Fatalf("无默认路由时 Wi-Fi 状态错误: %#v", state)
+	}
+	if state.Mode != network.AddressModeStatic || state.IPv4Address != "10.20.30.40" || state.Gateway != "10.20.30.1" {
+		t.Fatalf("无默认路由时 IPv4 信息错误: %#v", state)
 	}
 }
 
