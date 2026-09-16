@@ -79,6 +79,7 @@ type enabledRequest struct {
 }
 
 type settingsRequest struct {
+	ExitAfterLogin  *bool                    `json:"exit_after_login"`
 	AutoSwitch      *bool                    `json:"auto_switch"`
 	UnmatchedAction *config2.UnmatchedAction `json:"unmatched_action"`
 	Language        *config2.Language        `json:"language"`
@@ -123,6 +124,7 @@ func newAPIHandler(dependencies Dependencies) http.Handler {
 	router.HandleFunc("DELETE /api/v1/rules/{id}", handler.deleteRule)
 	router.HandleFunc("PUT /api/v1/rules/{id}/enabled", handler.setRuleEnabled)
 	router.HandleFunc("PUT /api/v1/settings", handler.updateSettings)
+	router.HandleFunc("PUT /api/v1/settings/exit-after-login", handler.updateExitAfterLogin)
 	router.HandleFunc("GET /api/v1/autostart", handler.getAutoStart)
 	router.HandleFunc("PUT /api/v1/autostart", handler.updateAutoStart)
 	router.HandleFunc("GET /api/v1/logs", handler.getLogs)
@@ -349,6 +351,28 @@ func (a *api) setRuleEnabled(response http.ResponseWriter, request *http.Request
 	writeJSON(response, http.StatusOK, updated)
 }
 
+func (a *api) updateExitAfterLogin(response http.ResponseWriter, request *http.Request) {
+	var input enabledRequest
+	if err := decodeJSON(response, request, &input); err != nil {
+		return
+	}
+	if input.Enabled == nil {
+		writeAPIError(response, http.StatusBadRequest, "invalid_json", "enabled is required", "enabled")
+		return
+	}
+	general := a.rules.Snapshot().General
+	general.ExitAfterLogin = *input.Enabled
+	updated, err := a.rules.UpdateGeneral(general)
+	if err != nil {
+		handleBusinessError(response, err)
+		return
+	}
+	if a.onSettingsUpdated != nil {
+		a.onSettingsUpdated(updated)
+	}
+	writeJSON(response, http.StatusOK, updated)
+}
+
 func (a *api) updateSettings(response http.ResponseWriter, request *http.Request) {
 	var input settingsRequest
 	if err := decodeJSON(response, request, &input); err != nil {
@@ -363,11 +387,16 @@ func (a *api) updateSettings(response http.ResponseWriter, request *http.Request
 		return
 	}
 
-	language := a.rules.Snapshot().General.Language
+	general := a.rules.Snapshot().General
+	language := general.Language
 	if input.Language != nil {
 		language = *input.Language
 	}
+	if input.ExitAfterLogin != nil {
+		general.ExitAfterLogin = *input.ExitAfterLogin
+	}
 	updated, err := a.rules.UpdateGeneral(config2.GeneralSettings{
+		ExitAfterLogin:  general.ExitAfterLogin,
 		AutoSwitch:      *input.AutoSwitch,
 		UnmatchedAction: *input.UnmatchedAction,
 		Language:        language,

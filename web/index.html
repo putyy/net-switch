@@ -105,36 +105,47 @@
             </div>
           </div>
 
-          <form id="settings-form">
+          <div id="settings-fields" role="group" aria-labelledby="settings-title" aria-busy="false">
             <label class="toggle-row" for="auto-switch">
               <span>
                 <strong data-i18n="settings.autoSwitch">启用自动切换</strong>
                 <small data-i18n="settings.autoSwitchHelp">网络变化后自动匹配已启用规则</small>
               </span>
               <span class="switch">
-                <input id="auto-switch" name="auto_switch" type="checkbox">
+                <input id="auto-switch" name="auto_switch" type="checkbox" disabled>
                 <span aria-hidden="true"></span>
               </span>
             </label>
 
             <label class="field" for="unmatched-action">
               <span data-i18n="settings.unmatched">没有匹配规则时</span>
-              <select id="unmatched-action" name="unmatched_action">
+              <select id="unmatched-action" name="unmatched_action" disabled>
                 <option value="keep" data-i18n="settings.keep">保持当前配置</option>
                 <option value="dhcp" data-i18n="settings.restoreDHCP">恢复 DHCP</option>
               </select>
             </label>
 
+            <label class="toggle-row" for="exit-after-login">
+              <span>
+                <strong data-i18n="settings.exitAfterLogin">开机联网后退出</strong>
+                <small data-i18n="settings.exitAfterLoginHelp">切换后立即保存。仅登录自启动时，联网成功后退出；退出后不再自动切换 Wi-Fi 配置。</small>
+              </span>
+              <span class="switch">
+                <input id="exit-after-login" name="exit_after_login" type="checkbox" disabled>
+                <span aria-hidden="true"></span>
+              </span>
+            </label>
+
             <label class="field" for="language">
               <span data-i18n="settings.language">界面语言</span>
-              <select id="language" name="language">
+              <select id="language" name="language" disabled>
                 <option value="zh-CN">简体中文</option>
                 <option value="en">English</option>
               </select>
             </label>
 
-            <button class="button secondary full-width" id="save-settings-button" type="submit" disabled data-i18n="settings.save">保存设置</button>
-          </form>
+          </div>
+          <p id="settings-status" class="settings-status" role="status" data-i18n="settings.autoSave">所有设置修改后立即保存</p>
 
           <div class="autostart-setting">
             <label class="toggle-row" for="autostart-toggle">

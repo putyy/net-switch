@@ -32,11 +32,12 @@ const elements = {
   ruleCount: document.querySelector("#rule-count"),
   ruleList: document.querySelector("#rule-list"),
   newRuleButton: document.querySelector("#new-rule-button"),
-  settingsForm: document.querySelector("#settings-form"),
+  settingsFields: document.querySelector("#settings-fields"),
+  settingsStatus: document.querySelector("#settings-status"),
+  exitAfterLogin: document.querySelector("#exit-after-login"),
   autoSwitch: document.querySelector("#auto-switch"),
   unmatchedAction: document.querySelector("#unmatched-action"),
   language: document.querySelector("#language"),
-  saveSettingsButton: document.querySelector("#save-settings-button"),
   autoStartToggle: document.querySelector("#autostart-toggle"),
   autoStartStatus: document.querySelector("#autostart-status"),
   refreshLogsButton: document.querySelector("#refresh-logs-button"),
@@ -78,6 +79,8 @@ let latestRuntimeState = null;
 let autoStartAvailable = false;
 let autoStartEnabled = false;
 let autoStartPending = false;
+let settingsPending = false;
+let savedSettings = null;
 let logsPending = false;
 let latestAutoStartState = null;
 let latestAppInfo = null;
@@ -256,13 +259,19 @@ async function runNetworkOperation(path, button, busyLabel) {
 }
 
 function renderConfiguration(configuration) {
-  const general = configuration?.general || {};
-  i18n.setLanguage(general.language);
-  elements.autoSwitch.checked = Boolean(general.auto_switch);
-  elements.unmatchedAction.value = general.unmatched_action === "dhcp" ? "dhcp" : "keep";
-  elements.language.value = i18n.normalize(general.language);
+  savedSettings = configuration?.general || {};
+  renderSettings(savedSettings);
+  setSettingsBusy(settingsPending);
   rules = Array.isArray(configuration?.rules) ? configuration.rules : [];
   renderRules();
+}
+
+function renderSettings(general) {
+  i18n.setLanguage(general.language);
+  elements.autoSwitch.checked = Boolean(general.auto_switch);
+  elements.exitAfterLogin.checked = Boolean(general.exit_after_login);
+  elements.unmatchedAction.value = general.unmatched_action === "dhcp" ? "dhcp" : "keep";
+  elements.language.value = i18n.normalize(general.language);
 }
 
 function renderAppInfo(info) {
@@ -653,32 +662,49 @@ async function deleteRule() {
   }
 }
 
-async function saveSettings(event) {
-  event.preventDefault();
-  setButtonBusy(elements.saveSettingsButton, true, t("settings.saving"));
+function setSettingsBusy(busy) {
+  settingsPending = busy;
+  elements.settingsFields.setAttribute("aria-busy", String(busy));
+  for (const control of [elements.autoSwitch, elements.exitAfterLogin, elements.unmatchedAction, elements.language]) {
+    control.disabled = busy || savedSettings === null;
+  }
+}
+
+function setSettingsStatus(key, isError = false) {
+  elements.settingsStatus.dataset.i18n = key;
+  elements.settingsStatus.textContent = t(key);
+  elements.settingsStatus.classList.toggle("error", isError);
+}
+
+async function saveSettings() {
+  if (settingsPending || savedSettings === null) return;
+  setSettingsBusy(true);
+  setSettingsStatus("settings.saving");
   try {
     const updated = await apiFetch("/api/v1/settings", {
       method: "PUT",
       body: {
         auto_switch: elements.autoSwitch.checked,
+        exit_after_login: elements.exitAfterLogin.checked,
         unmatched_action: elements.unmatchedAction.value,
         language: elements.language.value,
       },
     });
-    i18n.setLanguage(updated.language);
-    elements.saveSettingsButton.dataset.originalLabel = t("settings.save");
-    elements.language.value = i18n.normalize(updated.language);
+    savedSettings = updated;
+    renderSettings(savedSettings);
     renderRules();
     if (latestRuntimeState) renderNetwork(latestRuntimeState);
     if (latestAutoStartState) renderAutoStart(latestAutoStartState);
     if (latestAppInfo) renderAppInfo(latestAppInfo);
     if (latestLogEntries !== null) renderLogs(latestLogEntries);
     setConnection(true, t("connection.connected"));
-    showToast(t("settings.saved"));
+    setSettingsStatus("settings.saved");
   } catch (error) {
+    renderSettings(savedSettings);
+    setSettingsStatus("settings.saveFailed", true);
     showToast(error.message, true);
   } finally {
-    setButtonBusy(elements.saveSettingsButton, false);
+    setSettingsBusy(false);
   }
 }
 
@@ -726,7 +752,7 @@ async function initialize() {
     showRulesError(t("common.reopenDashboard"));
     elements.networkSummary.textContent = t("common.sessionUnavailable");
     elements.newRuleButton.disabled = true;
-    elements.saveSettingsButton.disabled = true;
+    setSettingsBusy(false);
     return;
   }
 
@@ -742,7 +768,6 @@ async function initialize() {
     renderAutoStart(autoStartState);
     renderAppInfo(appInfo);
     elements.newRuleButton.disabled = false;
-    elements.saveSettingsButton.disabled = false;
     elements.refreshLogsButton.disabled = false;
     setConnection(true, t("connection.connected"));
     await refreshLogs(false);
@@ -763,7 +788,9 @@ elements.restoreDHCPButton.addEventListener("click", () => showDialog(elements.r
 elements.ruleList.addEventListener("click", handleRuleAction);
 elements.ipv4Mode.addEventListener("change", updateStaticFields);
 elements.ruleForm.addEventListener("submit", saveRule);
-elements.settingsForm.addEventListener("submit", saveSettings);
+for (const control of [elements.autoSwitch, elements.exitAfterLogin, elements.unmatchedAction, elements.language]) {
+  control.addEventListener("change", saveSettings);
+}
 elements.autoStartToggle.addEventListener("change", updateAutoStart);
 elements.refreshLogsButton.addEventListener("click", () => refreshLogs(true));
 elements.closeRuleDialog.addEventListener("click", () => closeDialog(elements.ruleDialog));

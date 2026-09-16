@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/putyy/net-switch/internal/config"
 	"github.com/putyy/net-switch/internal/network"
 )
 
@@ -188,6 +189,8 @@ func TestReaderReturnsDisconnectedStateWithoutDefaultRoute(t *testing.T) {
 		outputs: map[string]string{
 			commandKey(networkSetupPath, "-listnetworkserviceorder"): serviceOrderFixture,
 			commandKey(netstatPath, "-rn", "-f", "inet"):             "Routing tables\n\nInternet:\nDestination Gateway Flags Netif\n",
+			commandKey(networkSetupPath, "-getinfo", "Wi-Fi"):        staticInfoFixture,
+			commandKey(networkSetupPath, "-getdnsservers", "Wi-Fi"):  "1.1.1.1\n",
 		},
 		errors: map[string]error{
 			commandKey(routePath, "-n", "get", "default"): errors.New("not in table"),
@@ -200,6 +203,113 @@ func TestReaderReturnsDisconnectedStateWithoutDefaultRoute(t *testing.T) {
 	}
 	if state.Status != network.StateStatusDisconnected || state.Service != "Wi-Fi" || state.Interface != "en0" {
 		t.Fatalf("断网状态错误: %#v", state)
+	}
+}
+
+type recoveryRuleSource struct{}
+
+func (recoveryRuleSource) Snapshot() config.Config { return config.Default() }
+
+func TestReaderRecoversStaleStaticWiFiConfiguration(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		route      string
+		netstat    string
+		routeErr   error
+		netstatErr error
+		ssid       string
+	}{
+		{
+			name:  "tunnel default route",
+			route: "gateway: 198.18.0.1\ninterface: utun5\n",
+			ssid:  "Home-WiFi",
+		},
+		{
+			name:     "tunnel route from netstat",
+			routeErr: errors.New("not in table"),
+			netstat:  "Destination Gateway Flags Netif\ndefault 198.18.0.1 UGScg utun5\n",
+			ssid:     "Home-WiFi",
+		},
+		{
+			name:     "no default route",
+			routeErr: errors.New("not in table"),
+			ssid:     "Home-WiFi",
+		},
+		{
+			name:       "route lookup fails",
+			routeErr:   errors.New("route failed"),
+			netstatErr: errors.New("netstat failed"),
+			ssid:       "Home-WiFi",
+		},
+		{
+			name:     "no route or readable SSID allows manual recovery",
+			routeErr: errors.New("not in table"),
+		},
+		{
+			name:  "tunnel without readable SSID allows manual recovery",
+			route: "gateway: 198.18.0.1\ninterface: utun5\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := fakeRunner{
+				outputs: map[string]string{
+					commandKey(networkSetupPath, "-listnetworkserviceorder"):  serviceOrderFixture,
+					commandKey(routePath, "-n", "get", "default"):             tt.route,
+					commandKey(netstatPath, "-rn", "-f", "inet"):              tt.netstat,
+					commandKey(networkSetupPath, "-getairportnetwork", "en0"): "Current Wi-Fi Network: " + tt.ssid,
+					commandKey(networkSetupPath, "-getinfo", "Wi-Fi"):         staticInfoFixture,
+					commandKey(networkSetupPath, "-getdnsservers", "Wi-Fi"):   "1.1.1.1\n",
+				},
+				errors: map[string]error{
+					commandKey(routePath, "-n", "get", "default"): tt.routeErr,
+					commandKey(netstatPath, "-rn", "-f", "inet"):  tt.netstatErr,
+				},
+			}
+			current, err := newReader(runner).Read(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.Service != "Wi-Fi" || current.Interface != "en0" || current.SSID != tt.ssid || current.Mode != network.AddressModeStatic || current.IPv4Address != "10.20.30.40" || current.Gateway != "10.20.30.1" || current.DNSMode != network.DNSModeManual {
+				t.Fatalf("physical Wi-Fi configuration missing or contaminated by tunnel: %#v", current)
+			}
+
+			// Simulate networksetup accepting DHCP and returning its new settings.
+			writes := &recordingRunner{outputs: map[string]string{
+				commandKey(networkSetupPath, "-listnetworkserviceorder"): serviceOrderFixture,
+				commandKey(networkSetupPath, "-getinfo", "Wi-Fi"):        dhcpInfoFixture,
+				commandKey(networkSetupPath, "-getdnsservers", "Wi-Fi"):  "There aren't any DNS Servers set on Wi-Fi.\n",
+			}}
+			operator := newOperator(writes, false)
+			switcher, err := network.NewAutoSwitcher(recoveryRuleSource{}, operator)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outcome, err := switcher.Reconcile(context.Background(), current)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.ssid == "" {
+				if current.Status != network.StateStatusDisconnected || outcome.Status.Attempted || len(writes.calls) != 0 {
+					t.Fatalf("automatic recovery must require an identified connection: %#v", outcome)
+				}
+				result, err := operator.RestoreDHCP(context.Background(), current)
+				if err != nil || !result.Success || !result.Verified {
+					t.Fatalf("manual DHCP recovery failed: %#v, %v", result, err)
+				}
+			} else if current.Status != network.StateStatusConnected || outcome.Status.Decision != network.AutoSwitchRestored || outcome.Result == nil || !outcome.Result.Verified {
+				t.Fatalf("unmatched Wi-Fi did not automatically restore DHCP: %#v", outcome)
+			}
+			wanted := [][]string{
+				{"-listnetworkserviceorder"},
+				{"-setdhcp", "Wi-Fi"},
+				{"-setdnsservers", "Wi-Fi", "Empty"},
+				{"-getinfo", "Wi-Fi"},
+				{"-getdnsservers", "Wi-Fi"},
+			}
+			if got := recordedArguments(writes.calls); !reflect.DeepEqual(got, wanted) {
+				t.Fatalf("unexpected recovery commands: %#v", got)
+			}
+		})
 	}
 }
 

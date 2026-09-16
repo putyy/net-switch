@@ -10,7 +10,7 @@ func TestDefaultIsValid(t *testing.T) {
 	if err := configuration.Validate(); err != nil {
 		t.Fatalf("默认配置无效: %v", err)
 	}
-	if !configuration.General.AutoSwitch || configuration.General.UnmatchedAction != UnmatchedDHCP || configuration.General.Language != LanguageChinese {
+	if !configuration.General.AutoSwitch || configuration.General.ExitAfterLogin || configuration.General.UnmatchedAction != UnmatchedDHCP || configuration.General.Language != LanguageChinese {
 		t.Fatalf("默认设置不符合预期: %#v", configuration.General)
 	}
 }

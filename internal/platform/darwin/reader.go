@@ -100,58 +100,56 @@ func (r *Reader) Read(ctx context.Context) (network.State, error) {
 	}
 
 	interfaceName, gateway, connected, err := r.readDefaultRoute(ctx)
-	if err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			state.Message = "Reading network status timed out"
-			state.MessageKey = "state.timeout"
-			return state, ctx.Err()
-		}
-		state.Message = "The default macOS network interface could not be identified; retrying shortly"
-		state.MessageKey = "state.route_unknown"
-		return state, err
+	if ctx.Err() != nil {
+		state.Message = "Reading network status timed out"
+		state.MessageKey = "state.timeout"
+		return state, ctx.Err()
 	}
 	ssidResolved := false
-	var activeService service
-	if !connected {
+	activeService, found := serviceForInterface(services, interfaceName)
+	if err != nil || !connected || !found {
 		wifi, ok := firstWiFiService(services)
 		if !ok {
+			if err != nil {
+				state.Message = "The default macOS network interface could not be identified; retrying shortly"
+				state.MessageKey = "state.route_unknown"
+				return state, err
+			}
+			if connected {
+				state.Interface = interfaceName
+				state.Message = "The network service for the default interface could not be identified"
+				state.MessageKey = "state.service_unknown"
+				return state, fmt.Errorf("no network service found for interface %q", interfaceName)
+			}
 			state.Status = network.StateStatusDisconnected
 			state.Message = "No default IPv4 network is available"
 			state.MessageKey = "state.no_default_route"
 			return state, nil
 		}
 
-		// A Wi-Fi link can be associated before macOS installs a usable default
-		// route, especially when a static configuration from another network is
-		// still active. Resolve the Wi-Fi link directly so automatic switching can
-		// inspect the SSID and restore DHCP instead of getting stuck here.
+		// A stale static configuration may have no default route, and a tunnel
+		// may own the default interface without a matching network service.
+		// Resolve Wi-Fi directly and never use the tunnel's gateway for it.
 		activeService = wifi
 		state.Service = wifi.Name
 		state.Interface = wifi.Interface
 		ssidResolved = true
-		if !r.applySSID(ctx, &state, wifi) {
-			state.Status = network.StateStatusDisconnected
-			if state.MessageKey == "" || state.MessageKey == "state.ssid_unavailable" {
-				state.Message = "No default IPv4 network is available"
-				state.MessageKey = "state.no_default_route"
-			}
-			return state, nil
+		state.Status = network.StateStatusDisconnected
+		if r.applySSID(ctx, &state, wifi) {
+			state.Status = network.StateStatusConnected
+		} else if err == nil && !connected && state.MessageKey == "state.ssid_unavailable" {
+			state.Message = "No default IPv4 network is available"
+			state.MessageKey = "state.no_default_route"
 		}
 	} else {
+		state.Status = network.StateStatusConnected
 		state.Interface = interfaceName
 		state.Gateway = gateway
-		var found bool
-		activeService, found = serviceForInterface(services, interfaceName)
-		if !found {
-			state.Status = network.StateStatusConnected
-			state.Message = "The network service for the default interface could not be identified"
-			state.MessageKey = "state.service_unknown"
-			return state, fmt.Errorf("no network service found for interface %q", interfaceName)
-		}
 		state.Service = activeService.Name
 	}
-	state.Status = network.StateStatusConnected
 
+	// Configuration is still readable without an SSID or working route. Keep
+	// it available for manual DHCP recovery; automatic switching requires SSID.
 	infoOutput, err := r.runner.Run(ctx, networkSetupPath, "-getinfo", activeService.Name)
 	if err != nil {
 		state.Message = "The current IPv4 configuration could not be read"

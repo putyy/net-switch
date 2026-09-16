@@ -621,6 +621,17 @@ dd {
   border-top: 1px solid var(--line);
 }
 
+.settings-status {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.settings-status.error {
+  color: var(--danger);
+}
+
 .toggle-row,
 .checkbox-row {
   display: flex;

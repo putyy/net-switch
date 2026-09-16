@@ -260,6 +260,87 @@ func TestSettingsAPIUpdatesLanguage(t *testing.T) {
 	}
 }
 
+func TestSettingsAPIUpdatesAndPreservesExitAfterLogin(t *testing.T) {
+	manager := &fakeRuleManager{configuration: config.Default()}
+	var notified config.GeneralSettings
+	handler := newHandler(testHost, testToken, testFiles(t), Dependencies{
+		Rules:             manager,
+		OnSettingsUpdated: func(settings config.GeneralSettings) { notified = settings },
+	})
+	for _, tt := range []struct {
+		body string
+		want bool
+	}{
+		{`{"auto_switch":true,"unmatched_action":"dhcp","exit_after_login":true}`, true},
+		{`{"auto_switch":true,"unmatched_action":"dhcp","language":"en"}`, true},
+		{`{"auto_switch":true,"unmatched_action":"dhcp","exit_after_login":false}`, false},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, apiRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(tt.body)))
+		if response.Code != http.StatusOK || manager.configuration.General.ExitAfterLogin != tt.want || notified.ExitAfterLogin != tt.want {
+			t.Fatalf("settings update failed: %s; general = %#v", response.Body.String(), manager.configuration.General)
+		}
+	}
+}
+
+func TestExitAfterLoginTogglePersistsAfterReload(t *testing.T) {
+	store := config.NewStoreAt(t.TempDir())
+	configuration := config.Default()
+	configuration.General.AutoSwitch = false
+	configuration.General.UnmatchedAction = config.UnmatchedKeep
+	configuration.General.Language = config.LanguageEnglish
+	for _, enabled := range []bool{true, false} {
+		manager, err := rule.NewManager(store, configuration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var notified config.GeneralSettings
+		handler := newHandler(testHost, testToken, testFiles(t), Dependencies{
+			Rules:             manager,
+			OnSettingsUpdated: func(settings config.GeneralSettings) { notified = settings },
+		})
+		body, err := json.Marshal(map[string]bool{"enabled": enabled})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, apiRequest(http.MethodPut, "/api/v1/settings/exit-after-login", bytes.NewReader(body)))
+		if response.Code != http.StatusOK {
+			t.Fatalf("toggle failed: %s", response.Body.String())
+		}
+		configuration, err = store.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		wanted := config.GeneralSettings{ExitAfterLogin: enabled, AutoSwitch: false, UnmatchedAction: config.UnmatchedKeep, Language: config.LanguageEnglish}
+		if configuration.General != wanted || notified != wanted {
+			t.Fatalf("toggle was lost or other settings changed: %#v", configuration.General)
+		}
+		reloaded, err := rule.NewManager(store, configuration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler = newHandler(testHost, testToken, testFiles(t), Dependencies{Rules: reloaded})
+		response = httptest.NewRecorder()
+		handler.ServeHTTP(response, apiRequest(http.MethodGet, "/api/v1/config", nil))
+		var refreshed config.Config
+		if err := json.Unmarshal(response.Body.Bytes(), &refreshed); err != nil || refreshed.General != wanted {
+			t.Fatalf("refreshed configuration differs: %s, %v", response.Body.String(), err)
+		}
+	}
+}
+
+func TestExitAfterLoginToggleRejectsMissingValue(t *testing.T) {
+	manager := &fakeRuleManager{configuration: config.Default()}
+	manager.configuration.General.ExitAfterLogin = true
+	handler := newHandler(testHost, testToken, testFiles(t), Dependencies{Rules: manager})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, apiRequest(http.MethodPut, "/api/v1/settings/exit-after-login", strings.NewReader(`{}`)))
+	if response.Code != http.StatusBadRequest || !manager.configuration.General.ExitAfterLogin {
+		t.Fatalf("missing enabled must not turn off the setting: %s", response.Body.String())
+	}
+}
+
 func TestAutoStartAPIReadsAvailableState(t *testing.T) {
 	handler := newHandler(testHost, testToken, testFiles(t), Dependencies{
 		Rules: &fakeRuleManager{configuration: config.Default()},

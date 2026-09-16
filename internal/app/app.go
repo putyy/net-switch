@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/putyy/net-switch/internal/applog"
@@ -109,6 +111,7 @@ func (a *App) Run(ctx context.Context) error {
 
 	runtimeCtx, stopRuntime := context.WithCancel(ctx)
 	defer stopRuntime()
+	var loginExitCancelled atomic.Bool
 	trayStatusUpdates := make(chan tray.Status, 1)
 	autoStartUpdates := make(chan bool, 1)
 	autoSwitchRequests := make(chan network2.State, 1)
@@ -247,33 +250,79 @@ func (a *App) Run(ctx context.Context) error {
 		return result, operationErr
 	}
 	go func() {
+		var exitChecks <-chan time.Time
+		if a.options.LoginStart && !a.options.DryRun {
+			ticker := time.NewTicker(loginExitInterval)
+			defer ticker.Stop()
+			exitChecks = ticker.C
+		}
+		probe := newInternetProbe()
+		var exitProgress loginExitProgress
 		for {
+			checkExit := false
 			select {
 			case <-runtimeCtx.Done():
 				return
-			case <-autoSwitchRequests:
-				networkOperationMu.Lock()
-				operationCtx, cancel := context.WithTimeout(runtimeCtx, networkOperationTimeout)
-				autoOperationCancelMu.Lock()
-				cancelAutoOperation = cancel
-				autoOperationCancelMu.Unlock()
-				outcome, operationErr := autoSwitcher.Reconcile(operationCtx, networkMonitor.Snapshot())
-				autoOperationCancelMu.Lock()
-				cancelAutoOperation = nil
-				autoOperationCancelMu.Unlock()
-				cancel()
-				rememberAutoSwitch(outcome.Status)
-				if outcome.Result != nil {
-					rememberOperation(*outcome.Result)
-					if outcome.Result.Plan != nil && !outcome.Result.DryRun {
-						refreshAfterOperation()
-					}
-					logOperationResult(*outcome.Result, operationErr)
-				} else {
-					log.Printf("Automatic switch decision (%s): %s", outcome.Status.Decision, outcome.Status.Message)
+			case <-exitChecks:
+				if loginExitCancelled.Load() || !a.ruleManager.Snapshot().General.ExitAfterLogin {
+					exitProgress = loginExitProgress{}
+					continue
 				}
-				networkOperationMu.Unlock()
+				checkExit = true
+			case <-autoSwitchRequests:
+				exitProgress = loginExitProgress{}
 			}
+			networkOperationMu.Lock()
+			if checkExit {
+				update := networkMonitor.Refresh(runtimeCtx)
+				if update.Err != nil {
+					exitProgress = loginExitProgress{}
+					networkOperationMu.Unlock()
+					continue
+				}
+			}
+			configuration := a.ruleManager.Snapshot()
+			operationCtx, cancel := context.WithTimeout(runtimeCtx, networkOperationTimeout)
+			autoOperationCancelMu.Lock()
+			cancelAutoOperation = cancel
+			autoOperationCancelMu.Unlock()
+			outcome, operationErr := autoSwitcher.Reconcile(operationCtx, networkMonitor.Snapshot())
+			autoOperationCancelMu.Lock()
+			cancelAutoOperation = nil
+			autoOperationCancelMu.Unlock()
+			cancel()
+			rememberAutoSwitch(outcome.Status)
+			if outcome.Result != nil {
+				rememberOperation(*outcome.Result)
+				if outcome.Result.Plan != nil && !outcome.Result.DryRun {
+					refreshAfterOperation()
+				}
+				logOperationResult(*outcome.Result, operationErr)
+			} else {
+				log.Printf("Automatic switch decision (%s): %s", outcome.Status.Decision, outcome.Status.Message)
+			}
+			if checkExit {
+				current := networkMonitor.Snapshot()
+				online := operationErr == nil && !loginExitCancelled.Load() && loginExitEligible(a.options, configuration.General, current, outcome)
+				if online {
+					probeCtx, cancelProbe := context.WithTimeout(runtimeCtx, loginExitInterval)
+					online = probe(probeCtx)
+					cancelProbe()
+				}
+				if online {
+					// Recheck after the request: a network or settings change during
+					// the probe must restart the consecutive-success count.
+					update := networkMonitor.Refresh(runtimeCtx)
+					online = update.Err == nil && reflect.DeepEqual(current, update.State) && reflect.DeepEqual(configuration, a.ruleManager.Snapshot())
+				}
+				if exitProgress.observe(configuration, current, online) && !loginExitCancelled.Load() && runtimeCtx.Err() == nil {
+					log.Print("Login network setup completed; consecutive Internet checks succeeded, exiting")
+					stopRuntime()
+					networkOperationMu.Unlock()
+					return
+				}
+			}
+			networkOperationMu.Unlock()
 		}
 	}()
 	var autoStartState func(context.Context) (bool, error)
@@ -377,6 +426,7 @@ func (a *App) Run(ctx context.Context) error {
 			case <-runtimeCtx.Done():
 				return
 			case <-runningInstance.OpenRequests():
+				loginExitCancelled.Store(true)
 				if openErr := browser.Open(localServer.DashboardURL()); openErr != nil {
 					log.Printf("Could not open the dashboard for a repeated launch request: %v", openErr)
 				}
@@ -395,6 +445,7 @@ func (a *App) Run(ctx context.Context) error {
 	tray.Run(runtimeCtx, tray.Actions{
 		RequestPermissions: requestPlatformPermissions,
 		OpenDashboard: func() {
+			loginExitCancelled.Store(true)
 			if openErr := browser.Open(localServer.DashboardURL()); openErr != nil {
 				log.Printf("Could not open the dashboard: %v", openErr)
 			}

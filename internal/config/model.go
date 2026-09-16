@@ -25,6 +25,7 @@ type Config struct {
 }
 
 type GeneralSettings struct {
+	ExitAfterLogin  bool            `toml:"exit_after_login" json:"exit_after_login"`
 	AutoSwitch      bool            `toml:"auto_switch" json:"auto_switch"`
 	UnmatchedAction UnmatchedAction `toml:"unmatched_action" json:"unmatched_action"`
 	Language        Language        `toml:"language,omitempty" json:"language"`

@@ -20,6 +20,7 @@ func TestStoreCreatesAndRoundTripsConfiguration(t *testing.T) {
 	}
 
 	configuration := validStaticConfiguration()
+	configuration.General.ExitAfterLogin = true
 	if err := store.Save(configuration); err != nil {
 		t.Fatalf("保存配置失败: %v", err)
 	}
@@ -111,5 +112,8 @@ unmatched_action = "keep"
 	}
 	if configuration.General.Language != LanguageChinese {
 		t.Fatalf("旧配置的默认语言 = %q，期望 %q", configuration.General.Language, LanguageChinese)
+	}
+	if configuration.General.ExitAfterLogin {
+		t.Fatal("旧配置不应默认启用开机联网后退出")
 	}
 }
