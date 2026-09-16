@@ -195,7 +195,7 @@ jobs:
             gh release create "$GITHUB_REF_NAME" release-assets/* \
               --verify-tag \
               --generate-notes \
-              --title "Net Switch $RELEASE_VERSION"
+              --title "$RELEASE_VERSION"
           fi
 
       - name: Delete temporary workflow artifacts
